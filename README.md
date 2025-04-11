@@ -1,9 +1,51 @@
-![IMG-20250318-WA0204](https://github.com/user-attachments/assets/109fbb97-3502-43ef-a8b6-b263a6e06418)
-- 👋 Hi, I’m @golfito-R
-- este es un Bot de pruebas
-- espero que no hagan spam 
+const { default: makeWASocket, DisconnectReason, useSingleFileAuthState } = require('@adiwajshing/baileys');
+const { Boom } = require('@hapi/boom');
+const fs = require('fs');
 
-<!---
-golfito-200/golfito R is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
-You can click the Preview link to take a look at your changes.
---->
+const { state, saveState } = useSingleFileAuthState('./auth_info.json');
+
+async function startBot() {
+  const sock = makeWASocket({
+    auth: state,
+    printQRInTerminal: true,
+  });
+
+  sock.ev.on('messages.upsert', async (m) => {
+    const msg = m.messages[0];
+    if (!msg.message) return; // Ignorar mensajes vacíos
+    if (msg.key.fromMe) return; // Ignorar mensajes del bot
+
+    const chatId = msg.key.remoteJid;
+    const senderId = msg.key.participant || msg.key.remoteJid;
+
+    if (msg.message.conversation) {
+      const text = msg.message.conversation;
+
+      // Detectar enlaces
+      if (text.includes('http://') || text.includes('https://')) {
+        // Eliminar mensaje
+        await sock.sendMessage(chatId, { text: '🚫 No se permiten enlaces en este grupo.' });
+        
+        // Expulsar al usuario (asegurarse de que el bot tenga permisos de administrador)
+        if (chatId.endsWith('@g.us')) {
+          await sock.groupParticipantsUpdate(chatId, [senderId], 'remove');
+        }
+      }
+    }
+  });
+
+  sock.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect } = update;
+    if (connection === 'close') {
+      const shouldReconnect = (lastDisconnect.error = Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+      console.log('connection closed due to ', lastDisconnect.error, ', reconnecting ', shouldReconnect);
+      if (shouldReconnect) startBot();
+    } else if (connection === 'open') {
+      console.log('Conexión exitosa.');
+    }
+  });
+
+  sock.ev.on('creds.update', saveState);
+}
+
+startBot();
